@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# my_ignore
+.claude/
+CLAUDE.md
+chroma_data/
