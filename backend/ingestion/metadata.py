@@ -4,10 +4,23 @@ os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 
 import feedparser
 import hashlib
+from typing import Optional, TypedDict
 
 FEED_URL = "https://hnrss.org/frontpage"
 SOURCE_NAME = "Hacker News"
 SOURCE_TIER = "B"  # placeholder until tier logic is built
+
+
+class Article(TypedDict):
+    id: str
+    title: str
+    link: str
+    published: Optional[str]
+    summary: str
+    source_name: str
+    source_tier: str
+    category: Optional[str]
+    confidence: Optional[float]
 
 
 def make_id(link: str) -> str:
@@ -15,7 +28,7 @@ def make_id(link: str) -> str:
     return hashlib.sha256(link.encode()).hexdigest()[:16]
 
 
-def build_article(entry) -> dict:
+def build_article(entry: feedparser.FeedParserDict) -> Article:
     return {
         "id": make_id(entry.link),
         "title": entry.title,
