@@ -39,6 +39,12 @@ def merge_into_existing(existing_id: str, new_article: Article) -> None:
     # default 1, not 0: the existing article itself is already one source
     metadata["source_count"] = metadata.get("source_count", 1) + 1
 
+    # two or more sources reporting the same event = corroborated. Known
+    # limitation: this doesn't check source INDEPENDENCE yet (two mirrors of
+    # one press release still count) — that check belongs to the agent layer
+    if metadata["source_count"] >= 2:
+        metadata["confidence_state"] = "corroborated"
+
     # Chroma metadata values must be str/int/float/bool — no lists — so the
     # URL list lives as a JSON string: parse on read, append, serialize on write
     source_urls = json.loads(metadata.get("source_urls", "[]"))
@@ -51,7 +57,8 @@ def merge_into_existing(existing_id: str, new_article: Article) -> None:
     # embedding and document stay untouched
     collection.update(ids=[existing_id], metadatas=[metadata])
     print(f"  merged into existing article {existing_id} "
-          f"(source_count={metadata['source_count']})")
+          f"(source_count={metadata['source_count']}, "
+          f"confidence={metadata.get('confidence_state', '?')})")
 
 
 def ingest_article(article: Article) -> None:
@@ -92,7 +99,7 @@ def ingest_article(article: Article) -> None:
         score = result.score
         reasoning = result.reasoning
         badges = " ".join(CATEGORY_EMOJI[c] for c in categories)
-        print(f"  {badges} {score}  {article['title']}")
+        print(f"  {badges} {score} [rumored]  {article['title']}")
     except Exception as e:
         # graceful degradation: one failed API call (rate limit, network,
         # outage) must not kill the rest of the batch — store the article
@@ -111,6 +118,9 @@ def ingest_article(article: Article) -> None:
             "categories": json.dumps(categories),
             "score": score,
             "reasoning": reasoning,
+            # a brand-new article has exactly one source reporting it —
+            # nothing corroborates it yet
+            "confidence_state": "rumored",
         },
     )
 
