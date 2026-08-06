@@ -7,6 +7,9 @@ from typing import TypedDict
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from chroma_client import get_collection
+from feedparser import FeedParserDict
+from metadata import build_article
+from embed_store import embed_text, build_document
 
 SIMILARITY_THRESHOLD = 0.85
 
@@ -49,3 +52,34 @@ def find_candidates(
             )
 
     return candidates
+
+
+if __name__ == "__main__":
+    # positive-case check: does a reworded near-duplicate of a REAL stored
+    # article actually get flagged? pull whatever's actually in Chroma right
+    # now rather than hardcoding a story, since the feed is live and changes
+    # between runs
+    collection = get_collection()
+    original = collection.get(limit=1, include=["metadatas"])
+    original_title = original["metadatas"][0]["title"]
+
+    # build_article() expects a feedparser entry, so fake one for a different
+    # "source" covering the same story, same title, a reworded one-line summary
+    fake_entry = FeedParserDict(
+        {
+            "title": original_title,
+            "link": "https://example.com/near-duplicate-of-stored-article",
+            "published": "Sun, 05 Jul 2026 12:00:00 +0000",
+            "summary": f"A different outlet's report on: {original_title}",
+        }
+    )
+    near_duplicate = build_article(fake_entry)
+    near_duplicate_embedding = embed_text(build_document(near_duplicate))
+
+    results = find_candidates(near_duplicate_embedding, near_duplicate["id"])
+
+    print(f"Original stored article: {original_title}")
+    print(f"New article: {near_duplicate['title']}")
+    print(f"Candidates found: {len(results)}")
+    for r in results:
+        print(f"  {r['similarity']:.3f}  {r['title']}")
