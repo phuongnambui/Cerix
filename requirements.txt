@@ -8,3 +8,4 @@ langfuse
 feedparser
 spacy
 trafilatura
+mcp
