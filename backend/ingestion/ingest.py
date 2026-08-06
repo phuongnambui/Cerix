@@ -99,7 +99,7 @@ def ingest_article(article: Article) -> None:
         score = result.score
         reasoning = result.reasoning
         badges = " ".join(CATEGORY_EMOJI[c] for c in categories)
-        print(f"  {badges} {score} [rumored]  {article['title']}")
+        print(f"  {badges} {score} [rumored, {article['source_tier']}]  {article['title']}")
     except Exception as e:
         # graceful degradation: one failed API call (rate limit, network,
         # outage) must not kill the rest of the batch — store the article
@@ -126,8 +126,10 @@ def ingest_article(article: Article) -> None:
 
 
 if __name__ == "__main__":
+    # full frontpage, not a slice — this is the daily-use entry point now
     feed = feedparser.parse(FEED_URL)
-    for entry in feed.entries[:5]:
+    print(f"Frontpage entries: {len(feed.entries)}")
+    for entry in feed.entries:
         article = build_article(entry)
         print(f"Ingesting: {article['title']}")
         ingest_article(article)
