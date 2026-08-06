@@ -7,6 +7,7 @@ import hashlib
 # neither is found automatically from here, so add both to the import search path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "classification")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "agent")))
 
 import feedparser
 from chroma_client import get_collection
@@ -15,6 +16,7 @@ from embed_store import embed_text, build_document, store_article
 from find_candidates import find_candidates
 from verify_duplicate import is_confirmed_duplicate
 from classify import classify, CATEGORY_EMOJI
+from verify import verify_article
 
 
 def make_thread_id(article_id: str) -> str:
@@ -39,11 +41,29 @@ def merge_into_existing(existing_id: str, new_article: Article) -> None:
     # default 1, not 0: the existing article itself is already one source
     metadata["source_count"] = metadata.get("source_count", 1) + 1
 
-    # two or more sources reporting the same event = corroborated. Known
-    # limitation: this doesn't check source INDEPENDENCE yet (two mirrors of
-    # one press release still count) — that check belongs to the agent layer
-    if metadata["source_count"] >= 2:
+    # two or more sources reporting the same event = corroborated. The
+    # rumored-only guard matters twice over: it stops a later merge from
+    # silently DOWNGRADING an already-confirmed article back to corroborated,
+    # and it makes verification run exactly once — at the flip moment.
+    previous_state = metadata.get("confidence_state", "rumored")
+    if metadata["source_count"] >= 2 and previous_state == "rumored":
         metadata["confidence_state"] = "corroborated"
+
+        # the moment of corroboration is the trigger for agent verification:
+        # can this be upgraded to confirmed (first-party source that actually
+        # supports the claim)? The claim = title + why we classified it that
+        # way; the url is the ORIGINAL article's own link.
+        claim = f"{metadata['title']}. {metadata.get('reasoning', '')}".strip()
+        try:
+            verdict = verify_article(metadata["link"], claim)
+            if verdict.is_first_party and verdict.supports_claim:
+                metadata["confidence_state"] = "confirmed"
+            # not confirmed is NOT a failure — the article simply stays
+            # corroborated until something better comes along
+        except Exception as e:
+            # same graceful degradation as classify(): a network/API error
+            # must not crash the merge — corroborated is already correct
+            print(f"  WARNING: verification failed for '{metadata['title']}': {e}")
 
     # Chroma metadata values must be str/int/float/bool — no lists — so the
     # URL list lives as a JSON string: parse on read, append, serialize on write
