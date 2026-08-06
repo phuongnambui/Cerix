@@ -3,16 +3,18 @@ import os
 import json
 import hashlib
 
-# chroma_client.py lives in backend/, one folder up from here (backend/ingestion/),
-# so it isn't found automatically — add that folder to Python's import search path
+# chroma_client.py lives in backend/, and classify.py in backend/classification/ —
+# neither is found automatically from here, so add both to the import search path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "classification")))
 
 import feedparser
 from chroma_client import get_collection
 from metadata import Article, build_article, FEED_URL
-from embed_store import embed_text, build_document, store_articles
+from embed_store import embed_text, build_document, store_article
 from find_candidates import find_candidates
 from verify_duplicate import is_confirmed_duplicate
+from classify import classify, CATEGORY_EMOJI
 
 
 def make_thread_id(article_id: str) -> str:
@@ -80,8 +82,37 @@ def ingest_article(article: Article) -> None:
             merge_into_existing(candidate["id"], article)
             return
 
-    # no candidate survived both passes: it's genuinely new
-    store_articles([article])
+    # no candidate survived both passes: it's genuinely new — classify it.
+    # Duplicates never reach this point, which is deliberate: a merged article
+    # is already tracked under the original's classification, so classifying
+    # it again would spend an API call on nothing.
+    try:
+        result = classify(document)
+        categories = result.categories
+        score = result.score
+        reasoning = result.reasoning
+        badges = " ".join(CATEGORY_EMOJI[c] for c in categories)
+        print(f"  {badges} {score}  {article['title']}")
+    except Exception as e:
+        # graceful degradation: one failed API call (rate limit, network,
+        # outage) must not kill the rest of the batch — store the article
+        # unclassified so ingestion keeps moving; score=0 marks "never
+        # classified" (real scores are 1-10) so a backfill pass can find these
+        print(f"  WARNING: classification failed for '{article['title']}': {e}")
+        categories, score, reasoning = [], 0, ""
+
+    store_article(
+        article,
+        document,
+        embedding,
+        extra_metadata={
+            # Chroma metadata can't hold lists — JSON string, same pattern
+            # as source_urls in merge_into_existing()
+            "categories": json.dumps(categories),
+            "score": score,
+            "reasoning": reasoning,
+        },
+    )
 
 
 if __name__ == "__main__":

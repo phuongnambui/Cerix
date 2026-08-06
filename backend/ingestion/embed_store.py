@@ -40,6 +40,35 @@ def build_document(article: Article) -> str:
     return f"{article['title']} {text}".strip()
 
 
+def store_article(
+    article: Article,
+    document: str,
+    embedding: list[float],
+    extra_metadata: dict | None = None,
+) -> None:
+    # single-article store that reuses an embedding the caller already computed
+    # (ingest.py embeds for dedup first — re-embedding here would double the
+    # model work) and lets the caller attach extra fields like classification
+    collection = get_collection()
+
+    metadata = {
+        "title": article["title"],
+        "link": article["link"],
+        "published": article["published"] or "",
+        "source_name": article["source_name"],
+        "source_tier": article["source_tier"],
+    }
+    if extra_metadata:
+        metadata.update(extra_metadata)
+
+    collection.add(
+        ids=[article["id"]],
+        embeddings=[embedding],
+        documents=[document],
+        metadatas=[metadata],
+    )
+
+
 def store_articles(articles: list[Article]) -> None:
     collection = get_collection()
 
