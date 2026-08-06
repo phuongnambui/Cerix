@@ -1,0 +1,92 @@
+import sys
+import os
+import json
+import hashlib
+
+# chroma_client.py lives in backend/, one folder up from here (backend/ingestion/),
+# so it isn't found automatically — add that folder to Python's import search path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+import feedparser
+from chroma_client import get_collection
+from metadata import Article, build_article, FEED_URL
+from embed_store import embed_text, build_document, store_articles
+from find_candidates import find_candidates
+from verify_duplicate import is_confirmed_duplicate
+
+
+def make_thread_id(article_id: str) -> str:
+    # a thread groups every source covering one event. Derived from the FIRST
+    # article's id so re-running the pipeline always produces the same
+    # thread_id for the same thread (deterministic > random here)
+    return hashlib.sha256(f"thread:{article_id}".encode()).hexdigest()[:16]
+
+
+def merge_into_existing(existing_id: str, new_article: Article) -> None:
+    """The new article is a confirmed duplicate: instead of storing it as its
+    own record, fold it into the existing article's metadata as extra evidence
+    (more sources covering a story = stronger importance signal later)."""
+    collection = get_collection()
+    existing = collection.get(ids=[existing_id], include=["metadatas"])
+    metadata = existing["metadatas"][0]
+
+    # first confirmed duplicate promotes the article into a "thread"
+    if "thread_id" not in metadata:
+        metadata["thread_id"] = make_thread_id(existing_id)
+
+    # default 1, not 0: the existing article itself is already one source
+    metadata["source_count"] = metadata.get("source_count", 1) + 1
+
+    # Chroma metadata values must be str/int/float/bool — no lists — so the
+    # URL list lives as a JSON string: parse on read, append, serialize on write
+    source_urls = json.loads(metadata.get("source_urls", "[]"))
+    if not source_urls:
+        source_urls.append(metadata["link"])  # seed with the original's own URL
+    source_urls.append(new_article["link"])
+    metadata["source_urls"] = json.dumps(source_urls)
+
+    # update() overwrites the metadata of an existing id in place —
+    # embedding and document stay untouched
+    collection.update(ids=[existing_id], metadatas=[metadata])
+    print(f"  merged into existing article {existing_id} "
+          f"(source_count={metadata['source_count']})")
+
+
+def ingest_article(article: Article) -> None:
+    collection = get_collection()
+
+    # exact re-fetch guard: RSS returns the same items every run, so the same
+    # URL (= same id) comes back constantly — skip before doing any model work
+    if collection.get(ids=[article["id"]])["ids"]:
+        print(f"  already stored, skipping: {article['title']}")
+        return
+
+    document = build_document(article)
+    embedding = embed_text(document)
+
+    # Pass 1: embedding similarity — "is anything stored ABOUT the same thing?"
+    candidates = find_candidates(embedding, article["id"])
+
+    # candidates come back nearest-first, so the first one that passes the
+    # entity check is the best match — merge there and stop
+    for candidate in candidates:
+        stored = collection.get(ids=[candidate["id"]], include=["documents"])
+        stored_document = stored["documents"][0]
+
+        # Pass 2: entity overlap — "is it the same EVENT, not just same topic?"
+        if is_confirmed_duplicate(document, stored_document):
+            print(f"Duplicate confirmed (sim={candidate['similarity']:.3f}): "
+                  f"{article['title']}")
+            merge_into_existing(candidate["id"], article)
+            return
+
+    # no candidate survived both passes: it's genuinely new
+    store_articles([article])
+
+
+if __name__ == "__main__":
+    feed = feedparser.parse(FEED_URL)
+    for entry in feed.entries[:5]:
+        article = build_article(entry)
+        print(f"Ingesting: {article['title']}")
+        ingest_article(article)

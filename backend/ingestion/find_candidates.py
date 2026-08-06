@@ -11,7 +11,10 @@ from feedparser import FeedParserDict
 from metadata import build_article
 from embed_store import embed_text, build_document
 
-SIMILARITY_THRESHOLD = 0.85
+# 0.85 missed a genuine paraphrase of the same story (scored 0.790), so this
+# is loosened to 0.75 — Pass 2 (entity verification) catches the false
+# positives that a looser threshold lets through
+SIMILARITY_THRESHOLD = 0.75
 
 
 class Candidate(TypedDict):

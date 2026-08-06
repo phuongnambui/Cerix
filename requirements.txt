@@ -6,3 +6,4 @@ sentence-transformers
 anthropic
 langfuse
 feedparser
+spacy
