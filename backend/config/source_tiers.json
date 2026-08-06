@@ -1,0 +1,27 @@
+{
+  "tier_a": [
+    "openai.com",
+    "anthropic.com",
+    "blog.google",
+    "ai.meta.com",
+    "engineering.atspotify.com",
+    "github.blog",
+    "netflixtechblog.com",
+    "blog.cloudflare.com",
+    "arxiv.org",
+    "sec.gov"
+  ],
+  "tier_b": [
+    "techcrunch.com",
+    "theverge.com",
+    "arstechnica.com",
+    "reuters.com",
+    "bloomberg.com",
+    "wsj.com",
+    "nytimes.com",
+    "wired.com",
+    "ft.com",
+    "bbc.com",
+    "apnews.com"
+  ]
+}
